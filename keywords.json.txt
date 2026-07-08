@@ -1,0 +1,38 @@
+{
+  "general": [
+    "online services",
+    "best products 2024",
+    "top rated solutions",
+    "buy online cheap",
+    "professional services near me",
+    "how to find best deals",
+    "product reviews 2024",
+    "compare prices online",
+    "customer service contact",
+    "free trial signup"
+  ],
+  "informational": [
+    "how does it work",
+    "complete guide 2024",
+    "step by step tutorial",
+    "beginner guide",
+    "what is the difference",
+    "pros and cons",
+    "tips and tricks",
+    "best practices",
+    "common mistakes to avoid",
+    "everything you need to know"
+  ],
+  "transactional": [
+    "buy now discount",
+    "limited time offer",
+    "free shipping deals",
+    "coupon code",
+    "best price guarantee",
+    "order online today",
+    "exclusive deals",
+    "save money today",
+    "special offer",
+    "flash sale"
+  ]
+}

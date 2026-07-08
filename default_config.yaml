@@ -1,0 +1,145 @@
+analytics:
+  ga4_api_secret: ''
+  ga4_enabled: false
+  ga4_measurement_id: ''
+  heatmap_enabled: false
+  heatmap_provider: hotjar
+  pixel_enabled: false
+  pixel_id: ''
+behavior:
+  attention_model: true
+  click_delay_max: 0.35
+  click_delay_min: 0.08
+  idle_probability: 0.08
+  keyboard_enabled: true
+  ml_adaptation: true
+  mouse_enabled: true
+  read_time_factor: 1.0
+  scroll_enabled: true
+  scroll_speed: random
+  typing_wpm_max: 95
+  typing_wpm_min: 35
+browser:
+  chrome_path: ''
+  chromedriver_path: ''
+  crash_recovery: true
+  disable_images: false
+  disable_javascript: false
+  extra_arguments: []
+  headless: true
+  implicit_wait: 0.0
+  mobile_device: Pixel 5
+  mobile_emulation: false
+  page_load_timeout: 30
+  pool_size: 30
+  recycle_after: 50
+  script_timeout: 10.0
+  warmup_count: 2
+  window_height: 1080
+  window_width: 1920
+fingerprint:
+  audio_spoofing: true
+  canvas_spoofing: true
+  consistency_checks: true
+  enabled: true
+  font_spoofing: true
+  language_spoofing: true
+  mutation_rate: 0.15
+  profiles_file: data/fingerprints.json
+  timezone_spoofing: true
+  tls_spoofing: true
+  webgl_spoofing: true
+general:
+  data_dir: data
+  debug: false
+  enable_encryption: false
+  locale: en-US
+  log_level: INFO
+  max_workers: 10
+  session_timeout: 300
+  timezone: America/New_York
+  version: 1.0.0
+gui:
+  always_on_top: false
+  chart_history: 300
+  enabled: true
+  log_lines: 500
+  refresh_interval: 1.0
+  theme: dark
+  window_height: 900
+  window_width: 1400
+monitoring:
+  alert_email: ''
+  dashboard_port: 8080
+  metrics_enabled: true
+  metrics_interval: 5.0
+  performance_sampling: true
+  self_healing: true
+  webhook_url: ''
+proxy:
+  authentication: {}
+  ban_duration: 3600.0
+  enabled: true
+  health_check_interval: 60.0
+  health_check_timeout: 10.0
+  max_failures: 3
+  min_pool_size: 5
+  pool_file: data/proxies.txt
+  protocols:
+  - http
+  - https
+  - socks5
+  residential_only: false
+  rotation_strategy: weighted
+  tor_circuit_ttl: 600.0
+  tor_control_password: ''
+  tor_control_port: 9051
+  tor_enabled: false
+security:
+  captcha_api_key: ''
+  captcha_budget: 10.0
+  captcha_service: 2captcha
+  encryption_enabled: false
+  obfuscate_config: false
+traffic:
+  bounce_rate: 0.35
+  daily_limit: 0
+  device_distribution:
+    desktop: 0.65
+    mobile: 0.3
+    tablet: 0.05
+  direct_ratio: 0.15
+  geo_distribution:
+    AU: 0.15
+    CA: 0.15
+    GB: 0.2
+    US: 0.5
+  keywords_file: data/keywords.json
+  max_session_duration: 480
+  min_session_duration: 45
+  organic_ratio: 0.6
+  pages_per_session:
+    max: 8
+    min: 1
+  referral_ratio: 0.1
+  schedule:
+    enabled: false
+    peak_hours:
+    - 9
+    - 10
+    - 11
+    - 14
+    - 15
+    - 16
+    - 20
+    - 21
+    peak_multiplier: 2.0
+    weekend_factor: 0.7
+  search_engines:
+  - google
+  - bing
+  - duckduckgo
+  sessions_per_hour: 30
+  social_ratio: 0.15
+  target_urls:
+  - https://differdeal.online/

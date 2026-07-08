@@ -1,0 +1,17 @@
+nodriver
+aiohttp
+aiofiles
+cryptography
+pyyaml
+jsonschema
+python-dotenv
+requests
+pysocks
+stem
+psutil
+numpy
+PyQt6
+pyqtgraph
+pytest
+pytest-asyncio
+pytest-mock
