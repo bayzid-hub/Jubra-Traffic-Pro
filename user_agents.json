@@ -1,0 +1,92 @@
+[
+  {
+    "ua_string": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.142 Safari/537.36",
+    "browser": "Chrome",
+    "browser_version": "125.0.6422.142",
+    "os_family": "Windows",
+    "os_version": "10.0",
+    "device_type": "desktop",
+    "market_share": 12.5
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Safari/537.36",
+    "browser": "Chrome",
+    "browser_version": "124.0.6367.82",
+    "os_family": "Windows",
+    "os_version": "10.0",
+    "device_type": "desktop",
+    "market_share": 10.2
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.142 Safari/537.36",
+    "browser": "Chrome",
+    "browser_version": "125.0.6422.142",
+    "os_family": "Mac",
+    "os_version": "10.15.7",
+    "device_type": "desktop",
+    "market_share": 7.8
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+    "browser": "Edge",
+    "browser_version": "125.0.0.0",
+    "os_family": "Windows",
+    "os_version": "10.0",
+    "device_type": "desktop",
+    "market_share": 3.6
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "browser": "Firefox",
+    "browser_version": "126.0",
+    "os_family": "Windows",
+    "os_version": "10.0",
+    "device_type": "desktop",
+    "market_share": 2.8
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.142 Mobile Safari/537.36",
+    "browser": "Chrome Mobile",
+    "browser_version": "125.0.6422.142",
+    "os_family": "Android",
+    "os_version": "13",
+    "device_type": "mobile",
+    "market_share": 8.4
+  },
+  {
+    "ua_string": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1",
+    "browser": "Mobile Safari",
+    "browser_version": "17.4.1",
+    "os_family": "iOS",
+    "os_version": "17.4",
+    "device_type": "mobile",
+    "market_share": 6.1
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.142 Mobile Safari/537.36",
+    "browser": "Chrome Mobile",
+    "browser_version": "125.0.6422.142",
+    "os_family": "Android",
+    "os_version": "14",
+    "device_type": "mobile",
+    "market_share": 6.8
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Linux; Android 12; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36",
+    "browser": "Chrome Mobile",
+    "browser_version": "124.0.6367.82",
+    "os_family": "Android",
+    "os_version": "12",
+    "device_type": "mobile",
+    "market_share": 7.1
+  },
+  {
+    "ua_string": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+    "browser": "Safari",
+    "browser_version": "17.4.1",
+    "os_family": "Mac",
+    "os_version": "14.4.1",
+    "device_type": "desktop",
+    "market_share": 4.2
+  }
+]
