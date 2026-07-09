@@ -1,8 +1,4 @@
-"""
-Jubra Traffic Pro - Multi-Protocol Proxy Engine
-Complete proxy lifecycle management with health scoring,
-intelligent rotation, ban detection, and geo-awareness.
-"""
+""" Jubra Traffic Pro - Multi-Protocol Proxy Engine Complete proxy lifecycle management with health scoring, intelligent rotation, ban detection, and geo-awareness. """
 
 import asyncio
 import time
@@ -14,11 +10,16 @@ import logging
 import ipaddress
 import aiohttp
 import aiofiles
+try:
+    from aiohttp_socks import ProxyConnector
+    HAS_AIOHTTP_SOCKS = True
+except ImportError:
+    ProxyConnector = None
+    HAS_AIOHTTP_SOCKS = False
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import (
-    Any, Dict, List, Optional, Set, Tuple,
-    AsyncIterator, Callable, Union
+    Any, Dict, List, Optional, Set, Tuple, AsyncIterator, Callable, Union
 )
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
@@ -42,51 +43,46 @@ from core.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 # Proxy Protocol & Type
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 
 class ProxyProtocol(Enum):
-    HTTP    = "http"
-    HTTPS   = "https"
-    SOCKS4  = "socks4"
-    SOCKS5  = "socks5"
-
+    HTTP = "http"
+    HTTPS = "https"
+    SOCKS4 = "socks4"
+    SOCKS5 = "socks5"
 
 class ProxyType(Enum):
-    DATACENTER   = "datacenter"
-    RESIDENTIAL  = "residential"
-    MOBILE       = "mobile"
-    ISP          = "isp"
-    TOR          = "tor"
-
+    DATACENTER = "datacenter"
+    RESIDENTIAL = "residential"
+    MOBILE = "mobile"
+    ISP = "isp"
+    TOR = "tor"
 
 class ProxyStatus(Enum):
-    UNKNOWN     = "unknown"
-    HEALTHY     = "healthy"
-    DEGRADED    = "degraded"
-    FAILED      = "failed"
-    BANNED      = "banned"
-    COOLDOWN    = "cooldown"
-    IN_USE      = "in_use"
-    RESERVED    = "reserved"
-
+    UNKNOWN = "unknown"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+    BANNED = "banned"
+    COOLDOWN = "cooldown"
+    IN_USE = "in_use"
+    RESERVED = "reserved"
 
 class RotationStrategy(Enum):
-    ROUND_ROBIN  = "round_robin"
-    WEIGHTED     = "weighted"
-    RANDOM       = "random"
-    STICKY       = "sticky"
-    LEAST_USED   = "least_used"
+    ROUND_ROBIN = "round_robin"
+    WEIGHTED = "weighted"
+    RANDOM = "random"
+    STICKY = "sticky"
+    LEAST_USED = "least_used"
     LEAST_FAILED = "least_failed"
-    GEO_OPTIMAL  = "geo_optimal"
-    PERFORMANCE  = "performance"
+    GEO_OPTIMAL = "geo_optimal"
+    PERFORMANCE = "performance"
 
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 # Proxy Health Score
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 
 @dataclass
 class ProxyHealthScore:
@@ -94,8 +90,8 @@ class ProxyHealthScore:
     Multi-dimensional health score for a proxy.
     Updated in real-time based on check results and usage.
     """
-    # Core score 0.0-1.0
-    overall:            float = 1.0
+    # Core score 0.0-1.0 overall
+    overall: float = 1.0
 
     # Sub-scores
     availability:       float = 1.0    # % successful connections
@@ -103,7 +99,7 @@ class ProxyHealthScore:
     anonymity:          float = 1.0    # how well it hides origin
     reliability:        float = 1.0    # consistency over time
     freshness:          float = 1.0    # recency of validation
-
+    
     # Raw stats
     total_requests:     int   = 0
     successful:         int   = 0
@@ -111,7 +107,7 @@ class ProxyHealthScore:
     timeouts:           int   = 0
     bans:               int   = 0
     captchas:           int   = 0
-
+    
     # Latency tracking (ms)
     latencies:          deque = field(default_factory=lambda: deque(maxlen=50))
     last_check_time:    float = 0.0
@@ -128,7 +124,6 @@ class ProxyHealthScore:
         """Update health score after a request attempt."""
         self.total_requests += 1
         now = time.monotonic()
-
         if success:
             self.successful += 1
             self.last_success_time = now
@@ -141,7 +136,6 @@ class ProxyHealthScore:
                 self.bans += 1
             if captcha:
                 self.captchas += 1
-
         self._recalculate()
 
     def _recalculate(self) -> None:
@@ -151,7 +145,7 @@ class ProxyHealthScore:
             self.availability = self.successful / self.total_requests
         else:
             self.availability = 1.0
-
+            
         # Speed score (based on median latency)
         if self.latencies:
             median_ms = sorted(self.latencies)[len(self.latencies) // 2]
@@ -159,22 +153,22 @@ class ProxyHealthScore:
             self.speed = max(0.1, min(1.0, 1.0 - (median_ms - 200) / 2000))
         else:
             self.speed = 0.5
-
+            
         # Reliability: exponential decay of failure impact
         recent_window = min(self.total_requests, 20)
         recent_failed = min(self.failed, recent_window // 2)
         self.reliability = max(0.0, 1.0 - (recent_failed / max(recent_window, 1)))
-
+        
         # Freshness: time since last check
         if self.last_check_time > 0:
             age_minutes = (time.monotonic() - self.last_check_time) / 60
             self.freshness = max(0.0, 1.0 - (age_minutes / 60))
         else:
             self.freshness = 0.5
-
+            
         # Ban penalty
         ban_penalty = min(1.0, self.bans * 0.25)
-
+        
         # Overall weighted score
         self.overall = (
             self.availability * 0.35 +
@@ -228,32 +222,31 @@ class ProxyHealthScore:
             "success_rate":     round(self.success_rate, 4),
         }
 
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 # Proxy Geo Information
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 
 @dataclass
 class ProxyGeoInfo:
     """Geographic and network information for a proxy."""
-    ip:             str     = ""
-    country_code:   str     = ""
-    country_name:   str     = ""
-    region:         str     = ""
-    city:           str     = ""
-    postal_code:    str     = ""
-    latitude:       float   = 0.0
-    longitude:      float   = 0.0
-    timezone:       str     = ""
-    isp:            str     = ""
-    org:            str     = ""
-    asn:            str     = ""
-    is_datacenter:  bool    = False
-    is_vpn:         bool    = False
-    is_tor:         bool    = False
-    is_proxy:       bool    = True
-    threat_score:   float   = 0.0   # 0.0=clean, 1.0=high threat
-    resolved_at:    float   = 0.0
+    ip: str = ""
+    country_code: str = ""
+    country_name: str = ""
+    region: str = ""
+    city: str = ""
+    postal_code: str = ""
+    latitude: float = 0.0
+    longitude: float = 0.0
+    timezone: str = ""
+    isp: str = ""
+    org: str = ""
+    asn: str = ""
+    is_datacenter: bool = False
+    is_vpn: bool = False
+    is_tor: bool = False
+    is_proxy: bool = True
+    threat_score: float = 0.0  # 0.0=clean, 1.0=high threat
+    resolved_at: float = 0.0
 
     @classmethod
     def from_api_response(cls, data: Dict[str, Any]) -> "ProxyGeoInfo":
@@ -292,27 +285,14 @@ class ProxyGeoInfo:
             "threat_score": round(self.threat_score, 3),
         }
 
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 # Proxy Object
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 
 class Proxy:
     """
     Complete proxy object with full lifecycle management.
-
-    Tracks:
-    ─────────────────────────────────────────────────────
-    • Protocol (HTTP/HTTPS/SOCKS4/SOCKS5)
-    • Authentication credentials
-    • Health score (real-time multi-dimensional)
-    • Geographic information
-    • Usage statistics per target domain
-    • Ban tracking per domain
-    • Cooldown management
-    • Session binding (sticky proxy support)
     """
-
     def __init__(
         self,
         host:       str,
@@ -338,50 +318,48 @@ class Proxy:
         self.tags           = tags or set()
         self.weight         = weight
         self.max_concurrent = max_concurrent
-
+        
         # State
         self._status        = ProxyStatus.UNKNOWN
         self._status_lock   = asyncio.Lock()
-
+        
         # Health
         self.health         = ProxyHealthScore()
-
-        # Geo info (populated after validation)
+        
+        # Geo info
         self.geo            = ProxyGeoInfo()
-
+        
         # Usage tracking
         self._active_sessions:   Set[str]           = set()
         self._domain_stats:      Dict[str, Dict]    = defaultdict(lambda: {
             "requests": 0, "successes": 0, "failures": 0,
             "bans": 0, "last_used": 0.0,
         })
-        self._banned_domains:    Dict[str, float]   = {}  # domain → unban_time
-
+        self._banned_domains:    Dict[str, float]   = {}  # domain -> unban_time
+        
         # Cooldown
         self._cooldown_until:    float = 0.0
         self._ban_until:         float = 0.0
-
+        
         # Sticky session binding
-        self._bound_sessions:    Dict[str, str]     = {}  # session_id → proxy_id (self)
-
+        self._bound_sessions:    Dict[str, str]     = {}  # session_id -> proxy_id (self)
+        
         # Timing
         self.created_at     = time.monotonic()
         self.last_used_at:  float = 0.0
         self.last_check_at: float = 0.0
-
         logger.debug(
             f"[Proxy] Created: {self.proxy_id} | "
             f"{self.url_masked} | type={proxy_type.value}"
         )
-
-    # ── URL Properties ─────────────────────────────────────
 
     @property
     def url(self) -> str:
         """Full proxy URL including credentials."""
         auth = ""
         if self.username and self.password:
-            auth = f"{self.username}:{self.password}@"
+            from urllib.parse import quote
+            auth = f"{quote(self.username, safe='')}:{quote(self.password, safe='')}@"
         return f"{self.protocol.value}://{auth}{self.host}:{self.port}"
 
     @property
@@ -401,8 +379,6 @@ class Proxy:
             "http":  self.url,
             "https": self.url,
         }
-
-    # ── Status ─────────────────────────────────────────────
 
     @property
     def status(self) -> ProxyStatus:
@@ -438,7 +414,6 @@ class Proxy:
         if time.monotonic() < self._ban_until:
             return True
         if self._status == ProxyStatus.BANNED:
-            # Auto-lift ban if time passed
             if time.monotonic() >= self._ban_until:
                 asyncio.create_task(self.set_status(ProxyStatus.UNKNOWN))
                 return False
@@ -451,8 +426,6 @@ class Proxy:
     @property
     def concurrent_count(self) -> int:
         return len(self._active_sessions)
-
-    # ── Session Management ─────────────────────────────────
 
     def acquire(self, session_id: str) -> bool:
         """Mark proxy as acquired by a session."""
@@ -468,8 +441,6 @@ class Proxy:
 
     def is_acquired_by(self, session_id: str) -> bool:
         return session_id in self._active_sessions
-
-    # ── Ban / Cooldown ─────────────────────────────────────
 
     async def ban(
         self,
@@ -506,8 +477,6 @@ class Proxy:
             return False
         return True
 
-    # ── Performance Recording ──────────────────────────────
-
     def record_success(
         self,
         latency_ms: float = 0.0,
@@ -539,15 +508,11 @@ class Proxy:
             stats["failures"] += 1
             stats["last_used"] = time.monotonic()
 
-    # ── Geo ────────────────────────────────────────────────
-
     def update_geo(self, geo: ProxyGeoInfo) -> None:
         """Update geographic information."""
         self.geo = geo
         if geo.country_code:
             self.country = geo.country_code
-
-    # ── Serialization ──────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -578,34 +543,73 @@ class Proxy:
         return f"{self.protocol.value}://{auth}{self.host}:{self.port}"
 
     @classmethod
-    def from_string(cls, proxy_str: str) -> "Proxy":
+    def from_string(
+        cls,
+        proxy_str: str,
+        default_protocol: Union[str, ProxyProtocol] = ProxyProtocol.HTTP,
+    ) -> "Proxy":
         """
-        Parse proxy from various string formats:
-        - http://user:pass@host:port
-        - socks5://host:port
+        Parse proxy from common text formats safely:
         - host:port
         - host:port:user:pass
+        - host:port:user:pass:with:colon
+        - user:pass@host:port
+        - http://user:pass@host:port
+        - socks5://host:port:user:pass
         """
         proxy_str = proxy_str.strip()
+        if not proxy_str:
+            raise ValueError("Empty proxy string")
+
+        if isinstance(default_protocol, ProxyProtocol):
+            protocol = default_protocol
+        else:
+            try:
+                protocol = ProxyProtocol(str(default_protocol).strip().lower())
+            except Exception:
+                protocol = ProxyProtocol.HTTP
 
         if "://" in proxy_str:
-            parsed = urlparse(proxy_str)
-            protocol = ProxyProtocol(parsed.scheme.lower())
-            host = parsed.hostname or ""
-            port = parsed.port or 8080
-            username = parsed.username
-            password = parsed.password
+            scheme_part, proxy_str = proxy_str.split("://", 1)
+            try:
+                protocol = ProxyProtocol(scheme_part.lower())
+            except Exception:
+                protocol = ProxyProtocol.HTTP
+
+        username = password = None
+
+        if "@" in proxy_str:
+            auth_part, host_port = proxy_str.rsplit("@", 1)
+            if ":" in auth_part:
+                username, password = auth_part.split(":", 1)
+            else:
+                username = auth_part
+            hp_parts = host_port.rsplit(":", 1)
+            if len(hp_parts) != 2:
+                raise ValueError(f"Invalid proxy host/port: {proxy_str}")
+            host, port_str = hp_parts[0], hp_parts[1]
         else:
             parts = proxy_str.split(":")
-            protocol = ProxyProtocol.HTTP
-            if len(parts) == 2:
-                host, port = parts[0], int(parts[1])
-                username = password = None
-            elif len(parts) == 4:
-                host, port = parts[0], int(parts[1])
-                username, password = parts[2], parts[3]
-            else:
+            if len(parts) < 2:
                 raise ValueError(f"Invalid proxy format: {proxy_str}")
+            host, port_str = parts[0], parts[1]
+            if len(parts) >= 4:
+                username = parts[2]
+                password = ":".join(parts[3:])
+            elif len(parts) == 3:
+                raise ValueError(
+                    f"Invalid proxy auth format, expected host:port:user:pass: {proxy_str}"
+                )
+
+        host = (host or "").strip()
+        if not host:
+            raise ValueError(f"Invalid proxy host: {proxy_str}")
+        try:
+            port = int(str(port_str).strip())
+        except Exception as exc:
+            raise ValueError(f"Invalid proxy port: {proxy_str}") from exc
+        if not (1 <= port <= 65535):
+            raise ValueError(f"Proxy port out of range: {proxy_str}")
 
         return cls(
             host=host,
@@ -632,14 +636,12 @@ class Proxy:
             return False
         return self.proxy_id == other.proxy_id
 
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 # Proxy Pool Statistics
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 
 class ProxyPoolStats:
     """Aggregated statistics for the entire proxy pool."""
-
     def __init__(self):
         self.total_requests:    int   = 0
         self.total_successes:   int   = 0
@@ -686,41 +688,20 @@ class ProxyPoolStats:
             "rotations_per_hr": round(self.rotations_per_hour, 1),
         }
 
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 # Proxy Engine
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# ==============================================================================
 
 class ProxyEngine:
     """
-    Jubra Traffic Pro - Multi-Protocol Proxy Engine
-
-    Features:
-    ─────────────────────────────────────────────────────
-    • Multi-protocol: HTTP/HTTPS/SOCKS4/SOCKS5
-    • 8 rotation strategies (round-robin to geo-optimal)
-    • Real-time health scoring per proxy
-    • Async health checking with configurable interval
-    • Domain-level ban tracking
-    • Geo-aware proxy selection
-    • Sticky session support
-    • Automatic pool replenishment alerts
-    • Thread-safe concurrent access
-    • File-based proxy loading + hot-reload
-    • Per-proxy per-domain statistics
-    • Proxy warm-up validation on load
-    • Automatic cooldown management
-    • Low-pool warning + exhaustion handling
+    Jubra Traffic Pro - Multi-Protocol Proxy Engine with Robust Parsing and Validation
     """
-
-    # GEO check endpoint (free tier)
     GEO_CHECK_URLS = [
         "http://ip-api.com/json/?fields=status,country,countryCode,"
         "region,regionName,city,zip,lat,lon,timezone,isp,org,as,"
         "hosting,proxy,query",
         "https://ipapi.co/json/",
     ]
-
     CONNECTIVITY_CHECK_URLS = [
         "https://httpbin.org/ip",
         "https://api.ipify.org?format=json",
@@ -746,37 +727,34 @@ class ProxyEngine:
         self._rotation_strategy     = rotation_strategy
         self._health_check_interval = health_check_interval
         self._health_check_timeout  = health_check_timeout
-        self._health_check_url      = health_check_url
+        self._health_check_url      = config.get("proxy.health_check_url", health_check_url)
         self._max_failures          = max_failures
         self._ban_duration          = ban_duration
         self._low_pool_threshold    = low_pool_threshold
         self._min_health_score      = min_health_score
         self._max_concurrent_checks = max_concurrent_checks
-
+        
         # Proxy storage
         self._proxies:          Dict[str, Proxy]    = {}
         self._proxy_list:       List[Proxy]         = []
         self._round_robin_idx:  int                 = 0
-        self._sticky_map:       Dict[str, str]      = {}  # session_id → proxy_id
+        self._sticky_map:       Dict[str, str]      = {}  # session_id -> proxy_id
         self._lock              = asyncio.Lock()
-
+        
         # Statistics
         self.stats              = ProxyPoolStats()
-
+        
         # Background tasks
         self._health_task:      Optional[asyncio.Task] = None
         self._running:          bool = False
-
+        
         # Semaphore for concurrent health checks
         self._check_semaphore   = asyncio.Semaphore(max_concurrent_checks)
-
         logger.info(
             f"[ProxyEngine] Initialized: "
             f"strategy={rotation_strategy.value}, "
             f"health_interval={health_check_interval}s"
         )
-
-    # ── Lifecycle ──────────────────────────────────────────
 
     async def start(self) -> None:
         """Start proxy engine and background health checker."""
@@ -798,8 +776,6 @@ class ProxyEngine:
                 pass
         logger.info("[ProxyEngine] Stopped")
 
-    # ── Proxy Loading ──────────────────────────────────────
-
     async def load_from_file(
         self,
         filepath:       str,
@@ -807,25 +783,31 @@ class ProxyEngine:
         proxy_type:     ProxyType = ProxyType.DATACENTER,
     ) -> int:
         """
-        Load proxies from file.
-        Supports formats:
-          - host:port
-          - host:port:user:pass
-          - protocol://user:pass@host:port
-          - JSON array of proxy objects
-        Returns count of loaded proxies.
+        Load proxies from file. Lines with errors are safely skipped.
         """
         path_obj = __import__("pathlib").Path(filepath)
         if not path_obj.exists():
             logger.warning(f"[ProxyEngine] Proxy file not found: {filepath}")
             return 0
-
         loaded = 0
         try:
             async with aiofiles.open(filepath, "r") as f:
                 content = await f.read()
 
-            # Try JSON first
+            # A file reload should reflect the current file contents. Replace the
+            # old pool first so stale failed proxies do not remain active after
+            # Save & Apply in the GUI.
+            async with self._lock:
+                self._proxies.clear()
+                self._proxy_list.clear()
+                self._round_robin_idx = 0
+                self._sticky_map.clear()
+
+            default_protocol = str(
+                self._config.get("proxy.default_protocol", "http") or "http"
+            ).strip().lower()
+
+            # Try JSON array first
             if content.strip().startswith("["):
                 proxy_data_list = json.loads(content)
                 for item in proxy_data_list:
@@ -834,31 +816,33 @@ class ProxyEngine:
                         await self._add_proxy(proxy)
                         loaded += 1
             else:
-                # Line-by-line text format
+                # Text format line-by-line
                 for line in content.splitlines():
                     line = line.strip()
                     if not line or line.startswith("#"):
                         continue
                     try:
-                        proxy = Proxy.from_string(line)
+                        proxy = Proxy.from_string(
+                            line,
+                            default_protocol=default_protocol,
+                        )
                         proxy.proxy_type = proxy_type
                         await self._add_proxy(proxy)
                         loaded += 1
                     except Exception as exc:
-                        logger.debug(f"[ProxyEngine] Skip invalid proxy: {line!r}: {exc}")
-
+                        logger.warning(f"[ProxyEngine] Skip invalid proxy line: {line!r} | Error: {exc}")
+                        continue
         except Exception as exc:
-            logger.error(f"[ProxyEngine] Load failed: {filepath}: {exc}")
+            logger.error(f"[ProxyEngine] Load failed from {filepath}: {exc}")
             return 0
 
-        logger.info(f"[ProxyEngine] Loaded {loaded} proxies from {filepath}")
-
+        logger.info(f"[ProxyEngine] Successfully loaded {loaded} proxies from {filepath}")
+        
         if validate and loaded > 0:
             validated = await self.validate_all(concurrent=min(loaded, 50))
             logger.info(
                 f"[ProxyEngine] Validated: {validated}/{loaded} healthy"
             )
-
         await self._emit_pool_event()
         return loaded
 
@@ -878,10 +862,8 @@ class ProxyEngine:
                 loaded += 1
             except Exception as exc:
                 logger.debug(f"[ProxyEngine] Skip: {proxy_str!r}: {exc}")
-
         if validate:
             await self.validate_all(concurrent=min(loaded, 50))
-
         return loaded
 
     async def add_proxy(self, proxy: Proxy) -> None:
@@ -898,8 +880,6 @@ class ProxyEngine:
                 return True
             return False
 
-    # ── Proxy Acquisition ──────────────────────────────────
-
     async def acquire_proxy(
         self,
         session_id:     str,
@@ -911,7 +891,6 @@ class ProxyEngine:
     ) -> Proxy:
         """
         Acquire a proxy for a session using the configured rotation strategy.
-        Raises ProxyPoolExhaustedError if no suitable proxy is available.
         """
         async with self._lock:
             # Check sticky session
@@ -923,7 +902,7 @@ class ProxyEngine:
                         proxy.acquire(session_id)
                         self.stats.record_rotation()
                         return proxy
-
+                        
             # Filter candidates
             candidates = self._filter_candidates(
                 country=country,
@@ -932,7 +911,6 @@ class ProxyEngine:
                 exclude_ids=exclude_ids or set(),
                 min_score=min_score or self._min_health_score,
             )
-
             if not candidates:
                 # Try with relaxed constraints
                 candidates = self._filter_candidates(
@@ -942,7 +920,6 @@ class ProxyEngine:
                     exclude_ids=exclude_ids or set(),
                     min_score=0.1,
                 )
-
             if not candidates:
                 available_total = sum(
                     1 for p in self._proxies.values() if p.is_available
@@ -955,21 +932,18 @@ class ProxyEngine:
                         session_id=session_id,
                     ),
                 )
-
+                
             # Select using strategy
             selected = self._select_proxy(candidates, session_id)
-
             if not selected.acquire(session_id):
                 raise ProxyPoolExhaustedError(
                     total_proxies=len(self._proxies),
                 )
-
+                
             # Update sticky map
             if self._rotation_strategy == RotationStrategy.STICKY:
                 self._sticky_map[session_id] = selected.proxy_id
-
             self.stats.record_rotation()
-
             await self._event_bus.publish_simple(
                 EventCategory.PROXY_ACQUIRED,
                 {
@@ -983,12 +957,11 @@ class ProxyEngine:
                 priority=EventPriority.LOW,
                 session_id=session_id,
             )
-
             logger.debug(
                 f"[ProxyEngine] Acquired: {selected.proxy_id} "
                 f"({selected.address}) for session {session_id[:8]}"
             )
-
+            
             # Check low pool warning
             available = sum(1 for p in self._proxies.values() if p.is_available)
             if available <= self._low_pool_threshold:
@@ -1001,7 +974,6 @@ class ProxyEngine:
                     },
                     priority=EventPriority.HIGH,
                 )
-
             return selected
 
     async def release_proxy(
@@ -1018,10 +990,8 @@ class ProxyEngine:
         proxy = self._proxies.get(proxy_id)
         if not proxy:
             return
-
         proxy.release(session_id)
         self.stats.record_request(success=success, banned=banned)
-
         if success:
             proxy.record_success(latency_ms=latency_ms, domain=domain)
         else:
@@ -1030,14 +1000,11 @@ class ProxyEngine:
                 banned=banned,
                 captcha=captcha,
             )
-
         # Handle ban
         if banned:
             await self._handle_ban(proxy, domain)
-
         # Update status based on health
         await self._update_proxy_status(proxy)
-
         await self._event_bus.publish_simple(
             EventCategory.PROXY_RELEASED,
             {
@@ -1057,15 +1024,6 @@ class ProxyEngine:
         session_id: str,
         **acquire_kwargs,
     ) -> AsyncIterator[Proxy]:
-        """
-        Async context manager for automatic proxy lifecycle.
-
-        Usage:
-            async with proxy_engine.proxy_context(session_id) as proxy:
-                # Use proxy for requests
-                ...
-            # Auto-released on exit
-        """
         proxy = await self.acquire_proxy(session_id, **acquire_kwargs)
         success = True
         latency_start = time.monotonic()
@@ -1083,107 +1041,122 @@ class ProxyEngine:
                 latency_ms=latency_ms,
             )
 
-    # ── Validation ─────────────────────────────────────────
-
     async def validate_proxy(
         self,
         proxy:      Proxy,
         check_geo:  bool = True,
     ) -> bool:
-        """
-        Validate a single proxy by connecting through it.
-        Returns True if proxy is healthy.
-        """
+        """Validate proxy connectivity with fallback URLs and clear diagnostics."""
         async with self._check_semaphore:
-            start = time.monotonic()
-            try:
-                connector = aiohttp.TCPConnector(ssl=False)
-                timeout   = aiohttp.ClientTimeout(total=self._health_check_timeout)
+            last_error = "unknown validation error"
+            urls = []
+            configured_urls = self._config.get("proxy.validation_urls", [])
+            if isinstance(configured_urls, list):
+                urls.extend(str(u).strip() for u in configured_urls if str(u).strip())
+            urls.append(self._health_check_url)
+            urls.extend(self.CONNECTIVITY_CHECK_URLS)
 
+            # Preserve order while removing duplicates.
+            seen = set()
+            check_urls = []
+            for url in urls:
+                if url and url not in seen:
+                    seen.add(url)
+                    check_urls.append(url)
+
+            try:
+                is_socks = proxy.protocol in {
+                    ProxyProtocol.SOCKS4,
+                    ProxyProtocol.SOCKS5,
+                }
+                if is_socks:
+                    if not HAS_AIOHTTP_SOCKS:
+                        last_error = "aiohttp_socks missing; run: pip install aiohttp_socks"
+                        raise RuntimeError(last_error)
+                    connector = ProxyConnector.from_url(proxy.url)
+                    proxy_arg = None
+                else:
+                    connector = aiohttp.TCPConnector(ssl=False)
+                    proxy_arg = proxy.url
+                timeout = aiohttp.ClientTimeout(total=self._health_check_timeout)
                 async with aiohttp.ClientSession(
                     connector=connector,
                     timeout=timeout,
                 ) as session:
-                    async with session.get(
-                        self._health_check_url,
-                        proxy=proxy.url,
-                        allow_redirects=True,
-                    ) as resp:
-                        latency_ms = (time.monotonic() - start) * 1000
-
-                        if resp.status == 200:
-                            proxy.record_success(latency_ms=latency_ms)
-                            proxy.last_check_at = time.monotonic()
-
-                            # Fetch geo info
-                            if check_geo and not proxy.geo.country_code:
-                                await self._fetch_geo(proxy, session)
-
-                            await proxy.set_status(ProxyStatus.HEALTHY)
-                            logger.debug(
-                                f"[ProxyEngine] Valid: {proxy.proxy_id} "
-                                f"({latency_ms:.0f}ms)"
-                            )
-                            return True
-                        else:
-                            proxy.record_failure()
-                            await proxy.set_status(ProxyStatus.DEGRADED)
-                            return False
-
-            except asyncio.TimeoutError:
-                proxy.record_failure(timeout=True)
-                proxy.health.timeouts += 1
-                await proxy.set_status(ProxyStatus.FAILED)
-                logger.debug(f"[ProxyEngine] Timeout: {proxy.proxy_id}")
-                return False
-
-            except aiohttp.ClientProxyConnectionError as exc:
-                proxy.record_failure()
-                await proxy.set_status(ProxyStatus.FAILED)
-                logger.debug(f"[ProxyEngine] Connection error: {proxy.proxy_id}: {exc}")
-                return False
-
+                    for check_url in check_urls:
+                        start = time.monotonic()
+                        try:
+                            async with session.get(
+                                check_url,
+                                proxy=proxy_arg,
+                                allow_redirects=True,
+                            ) as resp:
+                                latency_ms = (time.monotonic() - start) * 1000
+                                if 200 <= resp.status < 300:
+                                    proxy.record_success(latency_ms=latency_ms)
+                                    proxy.last_check_at = time.monotonic()
+                                    if check_geo and not proxy.geo.country_code:
+                                        await self._fetch_geo(
+                                            proxy,
+                                            session,
+                                            proxy_arg=proxy_arg,
+                                        )
+                                    await proxy.set_status(ProxyStatus.HEALTHY)
+                                    logger.info(
+                                        f"[ProxyEngine] Proxy healthy: "
+                                        f"{proxy.url_masked} ({latency_ms:.0f}ms)"
+                                    )
+                                    return True
+                                last_error = f"HTTP {resp.status} from {check_url}"
+                        except asyncio.TimeoutError:
+                            last_error = f"timeout at {check_url}"
+                        except aiohttp.ClientHttpProxyError as exc:
+                            last_error = f"proxy HTTP/auth error: {exc.status} {exc.message}"
+                            break
+                        except aiohttp.ClientProxyConnectionError as exc:
+                            last_error = f"proxy connection error: {exc}"
+                            break
+                        except Exception as exc:
+                            last_error = f"{type(exc).__name__}: {exc}"
+                            continue
             except Exception as exc:
-                proxy.record_failure()
-                await proxy.set_status(ProxyStatus.FAILED)
-                logger.debug(f"[ProxyEngine] Validate error: {proxy.proxy_id}: {exc}")
-                return False
+                last_error = f"session error: {type(exc).__name__}: {exc}"
+
+            proxy.record_failure(timeout="timeout" in last_error.lower())
+            proxy.last_check_at = time.monotonic()
+            await proxy.set_status(ProxyStatus.FAILED)
+            logger.warning(
+                f"[ProxyEngine] Proxy validation failed: "
+                f"{proxy.url_masked} | reason={last_error}"
+            )
+            return False
 
     async def validate_all(
         self,
         concurrent: int  = 20,
         check_geo:  bool = False,
     ) -> int:
-        """
-        Validate all proxies concurrently.
-        Returns count of healthy proxies.
-        """
+        """Validate all proxies concurrently."""
         proxies = list(self._proxies.values())
         if not proxies:
             return 0
-
         sem = asyncio.Semaphore(concurrent)
-
         async def _check(proxy: Proxy) -> bool:
             async with sem:
                 return await self.validate_proxy(proxy, check_geo=check_geo)
-
         logger.info(
             f"[ProxyEngine] Validating {len(proxies)} proxies "
             f"(concurrent={concurrent})"
         )
-
         results = await asyncio.gather(
             *[_check(p) for p in proxies],
             return_exceptions=True,
         )
-
         healthy = sum(1 for r in results if r is True)
         logger.info(
             f"[ProxyEngine] Validation complete: "
             f"{healthy}/{len(proxies)} healthy"
         )
-
         await self._event_bus.publish_simple(
             EventCategory.PROXY_HEALTH_UPDATE,
             {
@@ -1192,10 +1165,7 @@ class ProxyEngine:
                 "failed":   len(proxies) - healthy,
             },
         )
-
         return healthy
-
-    # ── Query / Statistics ─────────────────────────────────
 
     def get_proxy(self, proxy_id: str) -> Optional[Proxy]:
         return self._proxies.get(proxy_id)
@@ -1242,19 +1212,28 @@ class ProxyEngine:
             if p.status == ProxyStatus.BANNED
         )
 
+    @property
+    def socks_dependency_available(self) -> bool:
+        return HAS_AIOHTTP_SOCKS
+
+    @property
+    def requires_socks_dependency(self) -> bool:
+        return any(
+            p.protocol in {ProxyProtocol.SOCKS4, ProxyProtocol.SOCKS5}
+            for p in self._proxies.values()
+        )
+
     def get_pool_summary(self) -> Dict[str, Any]:
         proxies = list(self._proxies.values())
         by_status = defaultdict(int)
         by_country = defaultdict(int)
         by_type = defaultdict(int)
         scores = []
-
         for p in proxies:
             by_status[p.status.value] += 1
             by_country[p.country or "Unknown"] += 1
             by_type[p.proxy_type.value] += 1
             scores.append(p.health.overall)
-
         return {
             "total":        len(proxies),
             "available":    self.available_count,
@@ -1270,13 +1249,10 @@ class ProxyEngine:
         }
 
     def export_proxies(self, healthy_only: bool = True) -> List[str]:
-        """Export proxies as connection strings."""
         proxies = list(self._proxies.values())
         if healthy_only:
             proxies = [p for p in proxies if p.health.is_healthy]
         return [p.to_connection_string() for p in proxies]
-
-    # ── Internal ───────────────────────────────────────────
 
     async def _add_proxy(self, proxy: Proxy) -> None:
         async with self._lock:
@@ -1292,10 +1268,8 @@ class ProxyEngine:
         exclude_ids: Set[str]           = None,
         min_score:  float               = 0.0,
     ) -> List[Proxy]:
-        """Filter proxies to candidate list."""
         exclude_ids = exclude_ids or set()
         candidates = []
-
         for proxy in self._proxy_list:
             if proxy.proxy_id in exclude_ids:
                 continue
@@ -1310,7 +1284,6 @@ class ProxyEngine:
             if domain and proxy.is_banned_for_domain(domain):
                 continue
             candidates.append(proxy)
-
         return candidates
 
     def _select_proxy(
@@ -1318,21 +1291,16 @@ class ProxyEngine:
         candidates: List[Proxy],
         session_id: str,
     ) -> Proxy:
-        """Select best proxy using configured rotation strategy."""
         if not candidates:
             raise ProxyPoolExhaustedError(total_proxies=0)
-
         strategy = self._rotation_strategy
-
         if strategy == RotationStrategy.ROUND_ROBIN:
             self._round_robin_idx = (
                 self._round_robin_idx + 1
             ) % len(candidates)
             return candidates[self._round_robin_idx % len(candidates)]
-
         elif strategy == RotationStrategy.RANDOM:
             return random.choice(candidates)
-
         elif strategy == RotationStrategy.WEIGHTED:
             total = sum(p.weight * p.health.overall for p in candidates)
             if total == 0:
@@ -1344,18 +1312,13 @@ class ProxyEngine:
                 if r <= cumulative:
                     return proxy
             return candidates[-1]
-
         elif strategy == RotationStrategy.LEAST_USED:
             return min(candidates, key=lambda p: p.health.total_requests)
-
         elif strategy == RotationStrategy.LEAST_FAILED:
             return min(candidates, key=lambda p: p.health.failed)
-
         elif strategy == RotationStrategy.PERFORMANCE:
             return max(candidates, key=lambda p: p.health.overall)
-
         elif strategy == RotationStrategy.GEO_OPTIMAL:
-            # Prefer residential > ISP > datacenter
             type_priority = {
                 ProxyType.RESIDENTIAL: 3,
                 ProxyType.ISP:         2,
@@ -1370,17 +1333,13 @@ class ProxyEngine:
                     p.health.overall * 0.6
                 ),
             )
-
-        # Default: weighted
         return max(candidates, key=lambda p: p.health.overall)
 
     async def _handle_ban(self, proxy: Proxy, domain: str) -> None:
-        """Handle proxy ban detection."""
         if domain:
             await proxy.ban(duration_seconds=self._ban_duration, domain=domain)
         else:
             await proxy.ban(duration_seconds=self._ban_duration)
-
         await self._event_bus.publish_simple(
             EventCategory.PROXY_BANNED,
             {
@@ -1393,10 +1352,8 @@ class ProxyEngine:
         )
 
     async def _update_proxy_status(self, proxy: Proxy) -> None:
-        """Update proxy status based on current health score."""
         score = proxy.health.overall
         consecutive_failures = proxy.health.failed
-
         if score >= 0.7:
             await proxy.set_status(ProxyStatus.HEALTHY)
         elif score >= 0.4:
@@ -1411,13 +1368,13 @@ class ProxyEngine:
         self,
         proxy:   Proxy,
         session: aiohttp.ClientSession,
+        proxy_arg: Optional[str] = None,
     ) -> None:
-        """Fetch geographic info for a proxy."""
         for geo_url in self.GEO_CHECK_URLS:
             try:
                 async with session.get(
                     geo_url,
-                    proxy=proxy.url,
+                    proxy=proxy_arg,
                     timeout=aiohttp.ClientTimeout(total=8.0),
                 ) as resp:
                     if resp.status == 200:
@@ -1426,7 +1383,7 @@ class ProxyEngine:
                             geo = ProxyGeoInfo.from_api_response(data)
                             proxy.update_geo(geo)
                             logger.debug(
-                                f"[ProxyEngine] Geo: {proxy.proxy_id} → "
+                                f"[ProxyEngine] Geo: {proxy.proxy_id} -> "
                                 f"{geo.city}, {geo.country_code}"
                             )
                             return
@@ -1434,12 +1391,8 @@ class ProxyEngine:
                 continue
 
     async def _health_check_loop(self) -> None:
-        """Background health check loop."""
         logger.debug("[ProxyEngine] Health check loop started")
-
-        # Stagger initial checks
         await asyncio.sleep(5.0)
-
         while self._running:
             try:
                 await self._run_health_checks()
@@ -1451,33 +1404,25 @@ class ProxyEngine:
                 await asyncio.sleep(10.0)
 
     async def _run_health_checks(self) -> None:
-        """Run health checks on all proxies."""
         proxies = list(self._proxies.values())
         if not proxies:
             return
-
-        # Only check proxies that need validation
         to_check = [
             p for p in proxies
             if (time.monotonic() - p.last_check_at) > self._health_check_interval
             or p.status in {ProxyStatus.UNKNOWN, ProxyStatus.FAILED}
         ]
-
         if not to_check:
             return
-
         logger.debug(
             f"[ProxyEngine] Health checking {len(to_check)}/{len(proxies)} proxies"
         )
-
         results = await asyncio.gather(
             *[self.validate_proxy(p, check_geo=False) for p in to_check],
             return_exceptions=True,
         )
-
         healthy = sum(1 for r in results if r is True)
         failed  = sum(1 for r in results if r is False)
-
         await self._event_bus.publish_simple(
             EventCategory.PROXY_HEALTH_UPDATE,
             {
@@ -1488,8 +1433,6 @@ class ProxyEngine:
             },
             priority=EventPriority.LOW,
         )
-
-        # Check low pool
         available = self.available_count
         if available <= self._low_pool_threshold:
             await self._event_bus.publish_simple(
@@ -1512,9 +1455,13 @@ class ProxyEngine:
         data:       Dict[str, Any],
         proxy_type: ProxyType,
     ) -> Optional[Proxy]:
-        """Parse proxy from dictionary (JSON format)."""
         try:
-            protocol_str = data.get("protocol", "http").lower()
+            protocol_str = str(
+                data.get(
+                    "protocol",
+                    self._config.get("proxy.default_protocol", "http"),
+                ) or "http"
+            ).strip().lower()
             protocol = ProxyProtocol(protocol_str)
             return Proxy(
                 host        = data["host"],

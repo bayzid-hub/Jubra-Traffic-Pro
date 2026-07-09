@@ -575,7 +575,17 @@ class ConfigManager:
             try:
                 new_config = self._parse_file()
                 old_config = copy.deepcopy(self._config)
+                raw = self._path.read_bytes()
+                if self._encryption and _ConfigEncryption.is_encrypted(raw):
+                    raw = self._encryption.decrypt(raw)
+                current_hash = hashlib.sha256(raw).hexdigest()
                 changes = self._change_tracker.diff(old_config, new_config)
+
+                # Always refresh the file hash after a successful reload attempt.
+                # Without this, GUI saves that already updated the in-memory config
+                # caused the hot-reload loop to detect the same file change forever.
+                self._last_hash = current_hash
+                self._last_loaded = time.time()
 
                 if changes:
                     self._config = new_config
@@ -730,6 +740,9 @@ class ConfigManager:
             if backup_path.exists():
                 backup_path.replace(self._path)
             raise
+
+        self._last_hash = hashlib.sha256(content).hexdigest()
+        self._last_loaded = time.time()
 
         logger.info(f"[ConfigManager] Saved: {self._path}")
 

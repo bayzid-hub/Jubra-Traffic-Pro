@@ -650,7 +650,7 @@ class ConfigPanel(QWidget if HAS_QT else object):
             settings_map = {
                 "proxy_enabled":        "proxy.enabled",
                 "rotation_strategy":    "proxy.rotation_strategy",
-                "total_sessions":       "traffic.sessions_per_hour",
+                "total_sessions":       "traffic.total_sessions",
                 "sessions_per_hour":    "traffic.sessions_per_hour",
                 "daily_limit":          "traffic.daily_limit",
                 "organic_ratio":        "traffic.organic_ratio",
@@ -736,7 +736,7 @@ class ConfigPanel(QWidget if HAS_QT else object):
             settings_map = {
                 "proxy_enabled":        "proxy.enabled",
                 "rotation_strategy":    "proxy.rotation_strategy",
-                "total_sessions":       "traffic.sessions_per_hour",
+                "total_sessions":       "traffic.total_sessions",
                 "sessions_per_hour":    "traffic.sessions_per_hour",
                 "daily_limit":          "traffic.daily_limit",
                 "organic_ratio":        "traffic.organic_ratio",
@@ -801,6 +801,12 @@ class ConfigPanel(QWidget if HAS_QT else object):
 
             logger.info(
                 "[ConfigPanel] Config saved via GUI"
+            )
+
+            logger.info(
+                "[ConfigPanel] Traffic config saved: total_sessions=%s, sessions_per_hour=%s",
+                self._config.get("traffic.total_sessions"),
+                self._config.get("traffic.sessions_per_hour"),
             )
 
             proxy_engine = self._components.get("proxy_engine")

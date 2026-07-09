@@ -165,9 +165,41 @@ class BrowserFarm:
         self._warmup_task:  Optional[asyncio.Task]  = None
         self._running:      bool                    = False
 
-        # Semaphore: max 2 browsers launching simultaneously
-        self._launch_sem    = asyncio.Semaphore(2)
+        # Semaphore: configurable hard cap for simultaneous browser launches.
+        # Keep this at 1 by default to prevent multiple foreground windows from
+        # opening at the same time when the system is under failure/retry load.
+        self._launch_sem    = asyncio.Semaphore(
+            int(config.get("browser.max_parallel_launches", 1))
+        )
+        self._launch_lock   = asyncio.Lock()
 
+        # [PATCH] Browser storm prevention controls.
+        self._last_launch_attempt = 0.0
+        self._launch_cooldown_s = float(
+            config.get("browser.launch_cooldown_seconds", 5.0)
+        )
+        self._launch_attempts = deque()
+        self._max_launch_attempts_per_minute = int(
+            config.get("browser.max_launch_attempts_per_minute", 3)
+        )
+        self._replenisher_enabled = bool(
+            config.get("browser.replenisher_enabled", False)
+        )
+        self._force_destroy_on_stop = bool(
+            config.get("browser.force_destroy_on_stop", True)
+        )
+        self._destroy_on_release = bool(
+            config.get("browser.destroy_on_release", True)
+        )
+        self._destroy_timeout = float(
+            config.get("browser.destroy_timeout", 10.0)
+        )
+        self._cleanup_orphans_on_start = bool(
+            config.get("browser.cleanup_orphans_on_start", True)
+        )
+        self._cleanup_orphans_on_stop = bool(
+            config.get("browser.cleanup_orphans_on_stop", True)
+        )
         logger.info(
             f"[BrowserFarm] Initialized (nodriver): "
             f"pool={pool_size}, warmup={warmup_count}"
@@ -187,8 +219,15 @@ class BrowserFarm:
 
         self._running = True
 
+        if self._cleanup_orphans_on_start:
+            BrowserInstance.cleanup_orphaned_chrome_processes()
+
         # Pre-warm
-        if self._warmup_count > 0:
+        gui_lazy = bool(
+            self._config.get("browser.gui_lazy_startup", False)
+            or self._config.get("gui.lazy_browser_startup", False)
+        )
+        if self._warmup_count > 0 and not gui_lazy:
             logger.info(
                 f"[BrowserFarm] Pre-warming "
                 f"{self._warmup_count} browsers..."
@@ -216,10 +255,16 @@ class BrowserFarm:
             self._health_monitor(),
             name="BrowserFarm-Health",
         )
-        self._warmup_task = asyncio.create_task(
-            self._pool_replenisher(),
-            name="BrowserFarm-Replenisher",
-        )
+        if self._replenisher_enabled and self._min_available > 0:
+            self._warmup_task = asyncio.create_task(
+                self._pool_replenisher(),
+                name="BrowserFarm-Replenisher",
+            )
+        else:
+            self._warmup_task = None
+            logger.info(
+                "[BrowserFarm] Pool replenisher disabled; browsers launch only on demand."
+            )
 
         await self._event_bus.publish_simple(
             EventCategory.BROWSER_POOL_WARMED,
@@ -247,8 +292,10 @@ class BrowserFarm:
                 except asyncio.CancelledError:
                     pass
 
-        # Wait for in-use browsers
-        if self._in_use:
+        # Wait for in-use browsers only when force-destroy is disabled. In GUI
+        # shutdown/emergency stop, force destroy is safer because it prevents
+        # background workers from keeping Chrome windows alive.
+        if self._in_use and not self._force_destroy_on_stop:
             logger.info(
                 f"[BrowserFarm] Draining "
                 f"{len(self._in_use)} in-use browsers..."
@@ -258,8 +305,13 @@ class BrowserFarm:
                 if (time.monotonic() - drain_start) > drain_timeout:
                     break
                 await asyncio.sleep(1.0)
+        elif self._in_use:
+            logger.warning(
+                f"[BrowserFarm] Force destroying {len(self._in_use)} in-use browsers"
+            )
 
-        # Destroy all
+        # Destroy all known browsers, then optionally sweep orphaned app-owned
+        # Chrome processes that might have survived a crash or PID lookup failure.
         all_browsers = list(self._all.values())
         await asyncio.gather(
             *[b.destroy() for b in all_browsers],
@@ -269,6 +321,9 @@ class BrowserFarm:
         self._all.clear()
         self._in_use.clear()
         self._crashed.clear()
+
+        if self._cleanup_orphans_on_stop:
+            BrowserInstance.cleanup_orphaned_chrome_processes()
 
         logger.info(
             f"[BrowserFarm] Stopped. "
@@ -288,7 +343,7 @@ class BrowserFarm:
         timeout = timeout or self._acquisition_timeout
         start   = time.monotonic()
 
-        while True:
+        while self._running:
             browser = await self._try_acquire(session_id, profile)
 
             if browser:
@@ -327,18 +382,19 @@ class BrowserFarm:
                     ),
                 )
 
-            # Launch new if capacity available
+            # Launch only one on-demand browser at a time. The rolling launch
+            # limiter in _launch_browser() decides whether a new launch is safe.
             if len(self._all) < self._pool_size:
-                try:
-                    browser = await self._launch_browser(
-                        profile=profile
-                    )
-                    if browser:
-                        continue
-                except Exception as exc:
-                    logger.warning(
-                        f"[BrowserFarm] Launch failed: {exc}"
-                    )
+                async with self._launch_lock:
+                    if not self._running:
+                        break
+                    if len(self._all) < self._pool_size:
+                        try:
+                            browser = await self._launch_browser(profile=profile)
+                            if browser:
+                                continue
+                        except Exception as exc:
+                            logger.warning(f"[BrowserFarm] Launch failed: {exc}")
 
             logger.debug(
                 f"[BrowserFarm] Waiting for browser "
@@ -346,6 +402,16 @@ class BrowserFarm:
                 f"elapsed={elapsed:.1f}s)"
             )
             await asyncio.sleep(1.0)
+
+        raise BrowserPoolExhaustedError(
+            pool_size=self._pool_size,
+            active=len(self._in_use),
+            context=ErrorContext(
+                module="BrowserFarm",
+                operation="acquire_stopped",
+                session_id=session_id,
+            ),
+        )
 
     async def release(
         self,
@@ -374,6 +440,29 @@ class BrowserFarm:
 
         if browser.is_crashed:
             await self._handle_crashed(browser)
+            return
+
+        if self._destroy_on_release:
+            async with self._pool_lock:
+                self._all.pop(browser.browser_id, None)
+            try:
+                await asyncio.wait_for(
+                    browser.destroy(),
+                    timeout=max(1.0, self._destroy_timeout),
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[BrowserFarm] Destroy timeout, forcing orphan cleanup: {browser_id}"
+                )
+                try:
+                    BrowserInstance.cleanup_orphaned_chrome_processes()
+                except Exception:
+                    pass
+            finally:
+                self.metrics.total_destroyed += 1
+            logger.debug(
+                f"[BrowserFarm] Destroyed after release: {browser_id}"
+            )
             return
 
         if recycle and browser.needs_recycling:
@@ -465,12 +554,16 @@ class BrowserFarm:
             if browser.is_crashed:
                 async with self._pool_lock:
                     self._all.pop(browser.browser_id, None)
+                await browser.destroy()
+                self.metrics.total_destroyed += 1
                 return None
 
             # Verify browser is alive via nodriver
             if not await self._is_alive(browser):
                 async with self._pool_lock:
                     self._all.pop(browser.browser_id, None)
+                await browser.destroy()
+                self.metrics.total_destroyed += 1
                 return None
 
             return browser
@@ -479,16 +572,22 @@ class BrowserFarm:
             return None
 
     async def _is_alive(self, browser: BrowserInstance) -> bool:
-        """Check if browser process is still alive."""
+        """Check if the nodriver browser object is usable.
+
+        A freshly launched headless Chrome can reject a quick JS probe on
+        about:blank while CDP/proxy-auth handlers are still settling. The older
+        probe destroyed healthy browsers immediately after launch, which caused
+        repeated launch/terminate loops and BrowserPoolExhaustedError. For this
+        on-demand pool, a non-crashed BrowserInstance with a browser object and
+        page handle is considered alive; navigation will perform the real
+        verification later and record success/failure in the session report.
+        """
         try:
-            if browser._browser is None:
+            if browser is None or browser.is_crashed:
                 return False
-            # Quick JS eval to check browser is responding
-            result = await asyncio.wait_for(
-                browser.execute_script("return 1 + 1;"),
-                timeout=3.0,
-            )
-            return result == 2
+            if browser._browser is None or browser._page is None:
+                return False
+            return True
         except Exception:
             return False
 
@@ -498,6 +597,28 @@ class BrowserFarm:
     ) -> Optional[BrowserInstance]:
         """Launch a new nodriver browser instance."""
         async with self._launch_sem:
+            if not self._running:
+                return None
+
+            # Browser storm guard: one launch cooldown + rolling 60s limit.
+            now = time.time()
+            while self._launch_attempts and now - self._launch_attempts[0] > 60:
+                self._launch_attempts.popleft()
+
+            if len(self._launch_attempts) >= self._max_launch_attempts_per_minute:
+                logger.warning(
+                    "[BrowserFarm] Launch throttled: "
+                    f"{len(self._launch_attempts)} attempts in the last 60s"
+                )
+                return None
+
+            time_since_last = now - self._last_launch_attempt
+            if time_since_last < self._launch_cooldown_s:
+                await asyncio.sleep(self._launch_cooldown_s - time_since_last)
+
+            self._last_launch_attempt = time.time()
+            self._launch_attempts.append(self._last_launch_attempt)
+
             if len(self._all) >= self._pool_size:
                 return None
 
@@ -685,6 +806,9 @@ class BrowserFarm:
 
     async def _pool_replenisher(self) -> None:
         """Replenish pool to maintain minimum available."""
+        if not self._replenisher_enabled or self._min_available <= 0:
+            logger.info("[BrowserFarm] Replenisher exited: disabled by config")
+            return
         while self._running:
             try:
                 await asyncio.sleep(5.0)

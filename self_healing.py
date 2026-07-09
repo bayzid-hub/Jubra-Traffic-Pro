@@ -618,6 +618,16 @@ class SelfHealingEngine:
         elif action == HealingAction.ROTATE_PROXIES:
             proxy_engine = self._components.get("proxy_engine")
             if proxy_engine and hasattr(proxy_engine, "validate_all"):
+                if (
+                    getattr(proxy_engine, "requires_socks_dependency", False)
+                    and not getattr(proxy_engine, "socks_dependency_available", True)
+                ):
+                    logger.warning(
+                        "[SelfHealingEngine] Proxy validation skipped: "
+                        "aiohttp_socks is missing for SOCKS proxies. "
+                        "Run: pip install -r requirements.txt"
+                    )
+                    return False
                 logger.info("[SelfHealingEngine] Triggering proxy validation")
                 asyncio.create_task(proxy_engine.validate_all(concurrent=10))
                 return True

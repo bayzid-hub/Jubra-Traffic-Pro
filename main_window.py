@@ -1,46 +1,27 @@
-"""
-Jubra Traffic Pro - Main Window
-Master GUI controller with tabbed interface,
-system tray, and real-time updates.
-"""
+""" Jubra Traffic Pro - Main Window Master GUI controller with tabbed interface, system tray, and real-time updates. """
 import os
 import sys
 import asyncio
 import time
 import logging
+import concurrent.futures
 from typing import Any, Dict, Optional
+import platform as _platform
 
-os.environ["QT_QPA_PLATFORM"] = "windows"
+if _platform.system() == "Windows":
+    os.environ.setdefault("QT_QPA_PLATFORM", "windows")
+
 try:
     from PyQt6.QtWidgets import (
-        QApplication,
-        QMainWindow,
-        QTabWidget,
-        QWidget,
-        QVBoxLayout,
-        QHBoxLayout,
-        QStatusBar,
-        QLabel,
-        QPushButton,
-        QMessageBox,
-        QSplitter,
-        QFrame,
-        QSizePolicy,
-        QMenuBar,
+        QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
+        QStatusBar, QLabel, QPushButton, QMessageBox, QSplitter, QFrame,
+        QSizePolicy, QMenuBar,
     )
     from PyQt6.QtCore import (
-        Qt,
-        QTimer,
-        QThread,
-        pyqtSignal,
-        QSettings,
+        Qt, QTimer, QThread, pyqtSignal, QSettings,
     )
     from PyQt6.QtGui import (
-        QIcon,
-        QFont,
-        QPalette,
-        QColor,
-        QAction,
+        QIcon, QFont, QPalette, QColor, QAction,
     )
     HAS_QT = True
 except ImportError as exc:
@@ -123,8 +104,7 @@ QMenu::item:selected {
     background-color: #0f3460;
     color: #e94560;
 }
-QFrame[frameShape="4"],
-QFrame[frameShape="5"] {
+QFrame[frameShape="4"], QFrame[frameShape="5"] {
     color: #2d2d44;
 }
 QSplitter::handle {
@@ -135,25 +115,23 @@ QSplitter::handle {
 class AsyncBridge(QThread if HAS_QT else object):
     if HAS_QT:
         update_signal = pyqtSignal(dict)
-        error_signal  = pyqtSignal(str)
-        
+        error_signal = pyqtSignal(str)
+
     def __init__(self, components: Dict[str, Any], async_loop=None):
         if HAS_QT:
             super().__init__()
         self._components = components
-        self._loop       = async_loop # Use the provided background loop
+        self._loop       = async_loop
         self._running    = False
-        
+
     def run(self):
         self._running = True
         try:
-            # We don't create a new loop here anymore. We schedule the data collection
-            # on the main background loop.
             asyncio.run_coroutine_threadsafe(self._main_loop(), self._loop)
         except Exception as exc:
             if HAS_QT:
                 self.error_signal.emit(str(exc))
-                
+
     async def _main_loop(self):
         while self._running:
             try:
@@ -163,7 +141,7 @@ class AsyncBridge(QThread if HAS_QT else object):
             except Exception as exc:
                 logger.debug(f"[AsyncBridge] Data error: {exc}")
             await asyncio.sleep(1.0)
-            
+
     async def _collect_data(self) -> Dict[str, Any]:
         data = {"timestamp": time.time()}
         try:
@@ -197,23 +175,23 @@ class AsyncBridge(QThread if HAS_QT else object):
         except Exception as exc:
             logger.debug(f"[AsyncBridge] Collect error: {exc}")
         return data
-        
+
     def stop(self):
         self._running = False
-
 
 class StatusWidget(QWidget if HAS_QT else object):
     def __init__(self):
         if HAS_QT:
             super().__init__()
-            self._setup_ui()
-            
+        self._setup_ui()
+
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 2, 8, 2)
         self._labels: Dict[str, QLabel] = {}
         items = [
-            ("sessions",        "Sessions: 0/0"),
+            ("sessions",        "Active: 0 | Verified: 0"),
+            ("failed",          "Failed: 0"),
             ("proxies",         "Proxies: 0"),
             ("success_rate",    "Success: 0%"),
             ("detection",       "Detected: 0"),
@@ -241,7 +219,7 @@ class StatusWidget(QWidget if HAS_QT else object):
             "color: #4caf50; font-size: 12px;"
         )
         layout.addWidget(self._status_text)
-        
+
     def update_data(self, data: Dict[str, Any]):
         if not HAS_QT:
             return
@@ -250,16 +228,19 @@ class StatusWidget(QWidget if HAS_QT else object):
         sm = data.get("session_metrics", {})
         if "sessions" in self._labels:
             self._labels["sessions"].setText(
-                f"Sessions: "
-                f"{gm.get('active_workers', 0)}/"
-                f"{gm.get('total_launched', 0)}"
+                f"Active: {gm.get('active_workers', 0)} | "
+                f"Verified: {gm.get('total_verified_loads', gm.get('total_completed', 0))}"
+            )
+        if "failed" in self._labels:
+            self._labels["failed"].setText(
+                f"Failed: {gm.get('total_failed', 0)}"
             )
         if "proxies" in self._labels:
             self._labels["proxies"].setText(
                 f"Proxies: {pm.get('available', 0)}"
             )
         if "success_rate" in self._labels:
-            sr = sm.get("success_rate", 1.0)
+            sr = gm.get("overall_success_rate", gm.get("recent_success_rate", 0.0))
             self._labels["success_rate"].setText(
                 f"Success: {sr * 100:.1f}%"
             )
@@ -267,26 +248,40 @@ class StatusWidget(QWidget if HAS_QT else object):
             self._labels["detection"].setText(
                 f"Detected: {gm.get('total_detected', 0)}"
             )
-
+        active_campaigns = int(gm.get("active_campaigns", 0) or 0)
+        active_workers = int(gm.get("active_workers", 0) or 0)
+        if active_campaigns > 0 or active_workers > 0:
+            self._status_dot.setStyleSheet(
+                "color: #4caf50; font-size: 16px;"
+            )
+            self._status_text.setStyleSheet(
+                "color: #4caf50; font-size: 12px;"
+            )
+            self._status_text.setText("Engine: Running | Campaign: Running")
+        else:
+            self._status_dot.setStyleSheet(
+                "color: #9e9e9e; font-size: 16px;"
+            )
+            self._status_text.setStyleSheet(
+                "color: #9e9e9e; font-size: 12px;"
+            )
+            self._status_text.setText("Engine: Running | Campaign: Idle")
 
 class MainWindow(QMainWindow if HAS_QT else object):
-    """
-    Jubra Traffic Pro - Main GUI Window.
-    Tabs: Dashboard | Logs | Config | Charts
-    """
+    """Jubra Traffic Pro - Main GUI Window."""
     def __init__(
         self,
-        components:  Dict[str, Any],
+        components: Dict[str, Any],
         ring_buffer: Any = None,
-        async_loop: Any = None, # Accept the loop here
-        parent       = None,
+        async_loop: Any = None,
+        parent = None,
     ):
         if HAS_QT:
             super().__init__(parent)
-        self._components  = components
+        self._components = components
         self._ring_buffer = ring_buffer
         self._async_loop = async_loop
-        self._start_time  = time.monotonic()
+        self._start_time = time.monotonic()
         if HAS_QT:
             self._setup_window()
             self._setup_menu()
@@ -294,7 +289,7 @@ class MainWindow(QMainWindow if HAS_QT else object):
             self._setup_status_bar()
             self._setup_async_bridge()
             self._setup_update_timer()
-            
+
     def _setup_window(self):
         self.setWindowTitle("Jubra Traffic Pro")
         self.setMinimumSize(1200, 750)
@@ -306,34 +301,39 @@ class MainWindow(QMainWindow if HAS_QT else object):
             x   = (geo.width()  - 1400) // 2
             y   = (geo.height() - 900)  // 2
             self.move(x, y)
-            
+
     def _setup_menu(self):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
+        
         start_action = QAction("Start Campaign", self)
         start_action.setShortcut("Ctrl+S")
         start_action.triggered.connect(self._on_start)
         file_menu.addAction(start_action)
+        
         stop_action = QAction("Stop All", self)
         stop_action.setShortcut("Ctrl+Q")
         stop_action.triggered.connect(self._on_stop_all)
         file_menu.addAction(stop_action)
+        
         file_menu.addSeparator()
         exit_action = QAction("Exit", self)
         exit_action.setShortcut("Alt+F4")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        
         view_menu = menubar.addMenu("View")
         dark_action = QAction("Dark Theme", self)
         dark_action.triggered.connect(
             lambda: self.setStyleSheet(DARK_STYLESHEET)
         )
         view_menu.addAction(dark_action)
+        
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
-        
+
     def _setup_tabs(self):
         self._tabs = QTabWidget()
         self._tabs.setTabPosition(
@@ -344,11 +344,15 @@ class MainWindow(QMainWindow if HAS_QT else object):
             from gui.log_viewer   import LogViewer
             from gui.config_panel import ConfigPanel
             from gui.charts       import Charts
-            # Pass the async_loop to the Dashboard
+            
             self._dashboard = Dashboard(self._components, async_loop=self._async_loop)
             self._log_view  = LogViewer(self._ring_buffer)
-            self._config    = ConfigPanel(self._components)
+            self._config    = ConfigPanel(
+                self._components,
+                async_loop=self._async_loop,
+            )
             self._charts    = Charts()
+            
             self._tabs.addTab(
                 self._dashboard, "📊 Dashboard"
             )
@@ -376,14 +380,14 @@ class MainWindow(QMainWindow if HAS_QT else object):
             layout.addWidget(lbl)
             self._tabs.addTab(placeholder, "⚠️ Error")
         self.setCentralWidget(self._tabs)
-        
+
     def _setup_status_bar(self):
         self._status_widget = StatusWidget()
         self.statusBar().addPermanentWidget(
             self._status_widget, 1
         )
         self.statusBar().showMessage("Ready", 3000)
-        
+
     def _setup_async_bridge(self):
         self._bridge = AsyncBridge(self._components, self._async_loop)
         if HAS_QT:
@@ -394,12 +398,12 @@ class MainWindow(QMainWindow if HAS_QT else object):
                 self._on_error
             )
             self._bridge.start()
-            
+
     def _setup_update_timer(self):
         self._timer = QTimer()
         self._timer.timeout.connect(self._on_tick)
         self._timer.start(1000)
-        
+
     def _on_data_update(self, data: Dict[str, Any]):
         try:
             self._status_widget.update_data(data)
@@ -411,7 +415,7 @@ class MainWindow(QMainWindow if HAS_QT else object):
             logger.debug(
                 f"[MainWindow] Update error: {exc}"
             )
-            
+
     def _on_tick(self):
         uptime = time.monotonic() - self._start_time
         if hasattr(self, "_status_widget"):
@@ -423,12 +427,14 @@ class MainWindow(QMainWindow if HAS_QT else object):
                 label.setText(
                     f"Uptime: {h:02d}:{m:02d}:{s:02d}"
                 )
-                
+
     def _on_start(self):
         self.statusBar().showMessage(
             "Starting campaign...", 2000
         )
-        
+        if hasattr(self, "_dashboard"):
+            self._dashboard._on_start_campaign()
+
     def _on_stop_all(self):
         reply = QMessageBox.question(
             self,
@@ -441,10 +447,12 @@ class MainWindow(QMainWindow if HAS_QT else object):
             self.statusBar().showMessage(
                 "Stopping all campaigns...", 2000
             )
-            
+            if hasattr(self, "_dashboard"):
+                self._dashboard._on_stop_all()
+
     def _on_error(self, error: str):
         logger.error(f"[MainWindow] Async error: {error}")
-        
+
     def _show_about(self):
         QMessageBox.about(
             self,
@@ -454,8 +462,45 @@ class MainWindow(QMainWindow if HAS_QT else object):
             "<p>Version: 1.0.0</p>"
             "<p>Engine: nodriver (No ChromeDriver)</p>",
         )
-        
+
     def closeEvent(self, event):
+        # Emergency shutdown before accepting the close event. This prevents
+        # campaigns/workers from continuing to open browser windows while the
+        # user is trying to exit the app.
+        if self._async_loop:
+            async def _stop_core_now():
+                orch = self._components.get("traffic_orchestrator")
+                if orch:
+                    try:
+                        await orch.stop_all(drain_timeout=5.0)
+                    except TypeError:
+                        await orch.stop_all()
+                    except Exception as exc:
+                        logger.debug(f"[MainWindow] Orchestrator stop error: {exc}")
+
+                browser_farm = self._components.get("browser_farm")
+                if browser_farm:
+                    try:
+                        await browser_farm.stop(drain_timeout=3.0)
+                    except Exception as exc:
+                        logger.debug(f"[MainWindow] Browser farm stop error: {exc}")
+
+                try:
+                    from engines.browser.browser_controller import BrowserInstance
+                    BrowserInstance.cleanup_orphaned_chrome_processes()
+                except Exception as exc:
+                    logger.debug(f"[MainWindow] Chrome cleanup error: {exc}")
+
+            try:
+                future = asyncio.run_coroutine_threadsafe(
+                    _stop_core_now(), self._async_loop
+                )
+                future.result(timeout=10)
+            except concurrent.futures.TimeoutError:
+                logger.warning("[MainWindow] Close timeout; accepting close event anyway")
+            except Exception as exc:
+                logger.debug(f"[MainWindow] Close shutdown error: {exc}")
+
         if hasattr(self, "_bridge"):
             self._bridge.stop()
             self._bridge.wait(3000)
@@ -463,26 +508,21 @@ class MainWindow(QMainWindow if HAS_QT else object):
             self._timer.stop()
         event.accept()
 
-def launch_gui(
-    components:  Dict[str, Any],
-    ring_buffer: Any = None,
-    async_loop: Any = None
-) -> None:
+def launch_gui(components: Dict[str, Any], ring_buffer: Any = None, async_loop: Any = None) -> None:
     """Launch the GUI application in the main thread."""
     if not HAS_QT:
         logger.error(
             "PyQt6 not available. pip install PyQt6"
         )
         return
-    # Prevent duplicate QApplication instances
     existing = QApplication.instance()
     if existing is not None:
         app = existing
     else:
         app = QApplication(sys.argv)
-        app.setApplicationName("Jubra Traffic Pro")
-        app.setStyle("Fusion")
-        
+    app.setApplicationName("Jubra Traffic Pro")
+    app.setStyle("Fusion")
+    
     window = MainWindow(components, ring_buffer, async_loop)
     window.show()
     window.raise_()

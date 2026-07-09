@@ -1,5 +1,6 @@
 nodriver
 aiohttp
+aiohttp_socks
 aiofiles
 cryptography
 pyyaml

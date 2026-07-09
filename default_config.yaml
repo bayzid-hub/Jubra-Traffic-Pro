@@ -22,19 +22,32 @@ behavior:
 browser:
   chrome_path: ''
   chromedriver_path: ''
-  crash_recovery: true
+  cleanup_orphans_on_start: true
+  cleanup_orphans_on_stop: true
+  crash_recovery: false
+  destroy_on_release: true
+  destroy_timeout: 10.0
   disable_images: false
   disable_javascript: false
   extra_arguments: []
+  force_background_launch: true
+  force_destroy_on_stop: true
+  force_offscreen_launch: true
+  gui_lazy_startup: true
   headless: true
   implicit_wait: 0.0
+  launch_cooldown_seconds: 5.0
+  max_launch_attempts_per_minute: 3
+  max_parallel_launches: 1
+  min_available: 0
   mobile_device: Pixel 5
   mobile_emulation: false
   page_load_timeout: 30
-  pool_size: 30
+  pool_size: 1
   recycle_after: 50
+  replenisher_enabled: false
   script_timeout: 10.0
-  warmup_count: 2
+  warmup_count: 0
   window_height: 1080
   window_width: 1920
 fingerprint:
@@ -55,7 +68,7 @@ general:
   enable_encryption: false
   locale: en-US
   log_level: INFO
-  max_workers: 10
+  max_workers: 1
   session_timeout: 300
   timezone: America/New_York
   version: 1.0.0
@@ -63,6 +76,7 @@ gui:
   always_on_top: false
   chart_history: 300
   enabled: true
+  lazy_browser_startup: true
   log_lines: 500
   refresh_interval: 1.0
   theme: dark
@@ -79,9 +93,16 @@ monitoring:
 proxy:
   authentication: {}
   ban_duration: 3600.0
+  default_protocol: socks5
   enabled: true
   health_check_interval: 60.0
   health_check_timeout: 10.0
+  local_bridge:
+    bind_host: 127.0.0.1
+    bind_port: 0
+    connect_timeout: 15.0
+    enabled: true
+    idle_timeout: 45.0
   max_failures: 3
   min_pool_size: 5
   pool_file: data/proxies.txt
@@ -89,12 +110,28 @@ proxy:
   - http
   - https
   - socks5
+  required: true
   residential_only: false
-  rotation_strategy: weighted
+  rotation_strategy: round_robin
   tor_circuit_ttl: 600.0
   tor_control_password: ''
   tor_control_port: 9051
   tor_enabled: false
+  validate_on_load: false
+reporting:
+  content_validation:
+    blocked_title_keywords:
+    - One moment
+    - Just a moment
+    - Checking your browser
+    - Attention Required
+    - Please wait
+    - Security check
+    enabled: true
+    expected_title_keywords: []
+  enabled: true
+  mask_proxy_credentials: true
+  report_dir: reports
 security:
   captcha_api_key: ''
   captcha_budget: 10.0
@@ -102,26 +139,31 @@ security:
   encryption_enabled: false
   obfuscate_config: false
 traffic:
+  behavior_timeout: 8.0
   bounce_rate: 0.35
   daily_limit: 0
   device_distribution:
     desktop: 0.65
     mobile: 0.3
     tablet: 0.05
-  direct_ratio: 0.15
+  direct_ratio: 1.0
   geo_distribution:
     AU: 0.15
     CA: 0.15
     GB: 0.2
     US: 0.5
+  initial_tokens: 1.0
   keywords_file: data/keywords.json
   max_session_duration: 480
+  metadata_timeout: 3.0
   min_session_duration: 45
-  organic_ratio: 0.6
+  organic_ratio: 0.0
   pages_per_session:
     max: 8
     min: 1
-  referral_ratio: 0.1
+  qa_mode: true
+  qa_skip_behavior: true
+  referral_ratio: 0.0
   schedule:
     enabled: false
     peak_hours:
@@ -139,7 +181,10 @@ traffic:
   - google
   - bing
   - duckduckgo
-  sessions_per_hour: 30
-  social_ratio: 0.15
+  session_interval_seconds: 25.0
+  session_wall_timeout: 60.0
+  sessions_per_hour: 20
+  social_ratio: 0.0
   target_urls:
   - https://differdeal.online/
+  total_sessions: 20

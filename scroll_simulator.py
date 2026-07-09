@@ -5,6 +5,7 @@ with wheel events - no Selenium dependency.
 """
 
 import asyncio
+import math
 import random
 import time
 import logging
@@ -53,10 +54,10 @@ class ScrollSimulator:
         self._back_scroll_rate  = back_scroll_rate
         self._reading_pause_rate = reading_pause_rate
         self._viewport_h        = viewport_height
-        self._current_scroll:   int = 0
-        self._max_scroll:       int = 0
-        self._scroll_x:         float = 0.0
-        self._scroll_y:         float = 0.0
+        self._current_scroll    = 0
+        self._max_scroll        = 0
+        self._scroll_x          = 0.0
+        self._scroll_y          = 0.0
 
     # ── CDP Wheel Event ────────────────────────────────────
 
@@ -133,15 +134,12 @@ class ScrollSimulator:
             page_height = dims.get("scrollHeight", 3000)
             view_height = dims.get("clientHeight", self._viewport_h)
             max_scroll  = max(0, page_height - view_height)
-
             self._max_scroll    = max_scroll
             target_px           = int(max_scroll * target_depth)
-
             await self._scroll_to_position(
                 target_px, read_as_scroll
             )
             return target_px
-
         except Exception as exc:
             logger.debug(f"[ScrollSimulator] Depth error: {exc}")
             return 0
@@ -236,9 +234,7 @@ class ScrollSimulator:
         for i in range(steps):
             # Bell curve speed profile
             t           = i / steps
-            speed_mult  = math.sin(math.pi * t) if hasattr(
-                __import__('math'), 'sin'
-            ) else 1.0
+            speed_mult  = math.sin(math.pi * t)
             step_px     = max(
                 20,
                 int((total / steps) * speed_mult * random.uniform(0.8, 1.2)),
@@ -370,7 +366,3 @@ class ScrollSimulator:
             "max_scroll":       self._max_scroll,
             "speed_profile":    self._speed,
         }
-
-
-# Fix missing math import
-import math
